@@ -9,19 +9,11 @@
 #include "atomicops.h"
 #include "readerwriterqueue.h"
 
+#include "debug_print.h"
+
 using namespace std;
 using namespace cv;
 using namespace moodycamel;
-
-#define DEBUG_PRINT
-
-#ifdef DEBUG_PRINT
-#define DEBUG_PRINT_ERR(x) (std::cerr << x << std::endl)
-#define DEBUG_PRINT_OUT(x) (std::cout << x << std::endl)
-#else
-#define DEBUG_PRINT_ERR(x)
-#define DEBUG_PRINT_OUT(x)
-#endif
 
 #define NUMBER_OF_THREAD 4
 #define QUEUE_SIZE 500
@@ -88,7 +80,9 @@ Mat stitching(vector<Mat> imgs)
 		stitcher->setBlender(makePtr<detail::MultiBandBlender>(false));
     }
 
+    START_TIME(Stitch_Time);
     Stitcher::Status status = stitcher->stitch(imgs, output);
+    STOP_TIME(Stitch_Time);
 
     return output;
 }
