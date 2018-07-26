@@ -44,16 +44,21 @@ BlockingReaderWriterQueue<thread_output>    th_out[NUMBER_OF_THREAD];
 // create stitcher instance, setup, stitch frames
 Mat stitching(vector<Mat> imgs)
 {
+    START_TIME(Create_stitcher);
     Mat output;
     Ptr<Stitcher_mod> stitcher = Stitcher_mod::create(Stitcher_mod::PANORAMA, try_gpu);
+    STOP_TIME(Create_stitcher);
 
+    START_TIME(Setup_stitcher_params);
 	stitcher->setRegistrationResol(0.5);
 	stitcher->setSeamEstimationResol(0.1);
 	stitcher->setCompositingResol(Stitcher_mod::ORIG_RESOL);
 	stitcher->setPanoConfidenceThresh(1.0);
 	stitcher->setWaveCorrection(true);
 	stitcher->setWaveCorrectKind(detail::WAVE_CORRECT_HORIZ);
+    STOP_TIME(Setup_stitcher_params);
 
+    START_TIME(Setup_stitcher_modules);
     if(try_gpu)
     {
 		#if defined(HAVE_OPENCV_XFEATURES2D) && defined(HAVE_OPENCV_CUDALEGACY)
@@ -80,6 +85,7 @@ Mat stitching(vector<Mat> imgs)
         stitcher->setSeamFinder(makePtr<detail::VoronoiSeamFinder>());
 		stitcher->setBlender(makePtr<detail::MultiBandBlender>(false));
     }
+    STOP_TIME(Setup_stitcher_modules);
 
     START_TIME(Stitch_Time);
     Stitcher_mod::Status status = stitcher->stitch(imgs, output);

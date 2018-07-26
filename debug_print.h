@@ -10,7 +10,7 @@
 #define STOP_TIME(timeval) (timeval) = cv::getTickCount() - (timeval); \
                              DEBUG_PRINT_OUT(#timeval" execution time : " \
                               << (timeval)/(cv::getTickFrequency() * 1.0000) \
-                              << "sec")
+                              << " sec")
 #else
 #define DEBUG_PRINT_ERR(x)
 #define DEBUG_PRINT_OUT(x)

@@ -92,6 +92,8 @@
 # include "opencv2/stitching/stitching_tegra.hpp"
 #endif
 
+#include "debug_print.h"
+
 namespace cv {
 
 Stitcher_mod Stitcher_mod::createDefault(bool try_use_gpu)
@@ -210,12 +212,14 @@ Stitcher_mod::Status Stitcher_mod::composePanorama(InputArrayOfArrays images, Ou
         UMat img;
         seam_est_imgs_.resize(imgs.size());
 
+        START_TIME(Resize_in_seam_scale);
         for (size_t i = 0; i < imgs.size(); ++i)
         {
             imgs_[i] = imgs[i];
             resize(imgs[i], img, Size(), seam_scale_, seam_scale_, INTER_LINEAR_EXACT);
             seam_est_imgs_[i] = img.clone();
         }
+        STOP_TIME(Resize_in_seam_scale);
 
         std::vector<UMat> seam_est_imgs_subset;
         std::vector<UMat> imgs_subset;
@@ -249,6 +253,7 @@ Stitcher_mod::Status Stitcher_mod::composePanorama(InputArrayOfArrays images, Ou
         masks[i].setTo(Scalar::all(255));
     }
 
+    START_TIME(Warping_Image_and_Mask_in_seam_scale);
     // Warp images and their masks
     Ptr<detail::RotationWarper> w = warper_->create(float(warped_image_scale_ * seam_work_aspect_));
     for (size_t i = 0; i < imgs_.size(); ++i)
@@ -265,17 +270,24 @@ Stitcher_mod::Status Stitcher_mod::composePanorama(InputArrayOfArrays images, Ou
 
         w->warp(masks[i], K, cameras_[i].R, INTER_NEAREST, BORDER_CONSTANT, masks_warped[i]);
     }
+    STOP_TIME(Warping_Image_and_Mask_in_seam_scale);
 
+    START_TIME(Feeding_exposure_compensation_in_seam_scale);
     // Compensate exposure before finding seams
     exposure_comp_->feed(corners, images_warped, masks_warped);
+    STOP_TIME(Feeding_exposure_compensation_in_seam_scale);
+    START_TIME(Applying_exposure_compensation_in_seam_scale);
     for (size_t i = 0; i < imgs_.size(); ++i)
         exposure_comp_->apply(int(i), corners[i], images_warped[i], masks_warped[i]);
+    STOP_TIME(Applying_exposure_compensation_in_seam_scale);
 
+    START_TIME(Finding_seam_in_seam_scale);
     // Find seams
     std::vector<UMat> images_warped_f(imgs_.size());
     for (size_t i = 0; i < imgs_.size(); ++i)
         images_warped[i].convertTo(images_warped_f[i], CV_32F);
     seam_finder_->find(images_warped_f, corners, masks_warped);
+    STOP_TIME(Finding_seam_in_seam_scale);
 
     // Release unused memory
     seam_est_imgs_.clear();
@@ -343,7 +355,9 @@ Stitcher_mod::Status Stitcher_mod::composePanorama(InputArrayOfArrays images, Ou
         }
         if (std::abs(compose_scale - 1) > 1e-1)
         {
+            START_TIME(Resize_in_compose_scale);
             resize(full_img, img, Size(), compose_scale, compose_scale, INTER_LINEAR_EXACT);
+            STOP_TIME(Resize_in_compose_scale);
         }
         else
             img = full_img;
@@ -353,6 +367,7 @@ Stitcher_mod::Status Stitcher_mod::composePanorama(InputArrayOfArrays images, Ou
         Mat K;
         cameras_scaled[img_idx].K().convertTo(K, CV_32F);
 
+        START_TIME(Warping_Image_and_Mask_in_compose_scale);
         // Warp the current image
         w->warp(img, K, cameras_[img_idx].R, INTER_LINEAR, BORDER_REFLECT, img_warped);
 
@@ -360,33 +375,44 @@ Stitcher_mod::Status Stitcher_mod::composePanorama(InputArrayOfArrays images, Ou
         mask.create(img_size, CV_8U);
         mask.setTo(Scalar::all(255));
         w->warp(mask, K, cameras_[img_idx].R, INTER_NEAREST, BORDER_CONSTANT, mask_warped);
+        STOP_TIME(Warping_Image_and_Mask_in_compose_scale);
 
+        START_TIME(Applying_exposure_compensation_in_compose_scale);
         // Compensate exposure
         exposure_comp_->apply((int)img_idx, corners[img_idx], img_warped, mask_warped);
+        STOP_TIME(Applying_exposure_compensation_in_compose_scale);
 
         img_warped.convertTo(img_warped_s, CV_16S);
         img_warped.release();
         img.release();
         mask.release();
 
+        START_TIME(Resize_seam_mask_to_compose_size_mask);
         // Make sure seam mask has proper size
         dilate(masks_warped[img_idx], dilated_mask, Mat());
         resize(dilated_mask, seam_mask, mask_warped.size(), 0, 0, INTER_LINEAR_EXACT);
 
         bitwise_and(seam_mask, mask_warped, mask_warped);
+        STOP_TIME(Resize_seam_mask_to_compose_size_mask);
 
+        START_TIME(Prepare_Blending);
         if (!is_blender_prepared)
         {
             blender_->prepare(corners, sizes);
             is_blender_prepared = true;
         }
+        STOP_TIME(Prepare_Blending);
 
+        START_TIME(Feeding_Blending);
         // Blend the current image
         blender_->feed(img_warped_s, mask_warped, corners[img_idx]);
+        STOP_TIME(Feeding_Blending);
     }
 
+    START_TIME(Blending);
     UMat result, result_mask;
     blender_->blend(result, result_mask);
+    STOP_TIME(Blending);
 
     // Preliminary result is in CV_16SC3 format, but all values are in [0,255] range,
     // so convert it to avoid user confusing
@@ -452,7 +478,9 @@ Stitcher_mod::Status Stitcher_mod::matchImages()
                 work_scale_ = std::min(1.0, std::sqrt(registr_resol_ * 1e6 / full_img.size().area()));
                 is_work_scale_set = true;
             }
+            START_TIME(Resize_in_work_scale);
             resize(full_img, img, Size(), work_scale_, work_scale_, INTER_LINEAR_EXACT);
+            STOP_TIME(Resize_in_work_scale);
         }
         if (!is_seam_scale_set)
         {
@@ -476,10 +504,13 @@ Stitcher_mod::Status Stitcher_mod::matchImages()
         }
         features_[i].img_idx = (int)i;
 
+        START_TIME(Resize_in_seam_scale);
         resize(full_img, img, Size(), seam_scale_, seam_scale_, INTER_LINEAR_EXACT);
         seam_est_imgs_[i] = img.clone();
+        STOP_TIME(Resize_in_seam_scale);
     }
 
+    START_TIME(Finding_Feature_time);
     // find features possibly in parallel
     if (rois_.empty())
         (*features_finder_)(feature_find_imgs, features_);
@@ -492,9 +523,12 @@ Stitcher_mod::Status Stitcher_mod::matchImages()
     img.release();
     feature_find_imgs.clear();
     feature_find_rois.clear();
+    STOP_TIME(Finding_Feature_time);
 
+    START_TIME(Matching_Feature_time);
     (*features_matcher_)(features_, pairwise_matches_, matching_mask_);
     features_matcher_->collectGarbage();
+    STOP_TIME(Matching_Feature_time);
 
     // Leave only images we are sure are from the same panorama
     indices_ = detail::leaveBiggestComponent(features_, pairwise_matches_, (float)conf_thresh_);
@@ -531,8 +565,10 @@ Stitcher_mod::Status Stitcher_mod::estimateCameraParams()
     else
         estimator = makePtr<detail::HomographyBasedEstimator>();
 
+    START_TIME(Estimate_Camera_Parameter_time);
     if (!(*estimator)(features_, pairwise_matches_, cameras_))
         return ERR_HOMOGRAPHY_EST_FAIL;
+    STOP_TIME(Estimate_Camera_Parameter_time);
 
     for (size_t i = 0; i < cameras_.size(); ++i)
     {
@@ -542,9 +578,11 @@ Stitcher_mod::Status Stitcher_mod::estimateCameraParams()
         //LOGLN("Initial intrinsic parameters #" << indices_[i] + 1 << ":\n " << cameras_[i].K());
     }
 
+    START_TIME(Bundle_Adjuster_time);
     bundle_adjuster_->setConfThresh(conf_thresh_);
     if (!(*bundle_adjuster_)(features_, pairwise_matches_, cameras_))
         return ERR_CAMERA_PARAMS_ADJUST_FAIL;
+    STOP_TIME(Bundle_Adjuster_time);
 
     // Find median focal length and use it as final image scale
     std::vector<double> focals;
@@ -562,12 +600,14 @@ Stitcher_mod::Status Stitcher_mod::estimateCameraParams()
 
     if (do_wave_correct_)
     {
+        START_TIME(Wave_Correct_time);
         std::vector<Mat> rmats;
         for (size_t i = 0; i < cameras_.size(); ++i)
             rmats.push_back(cameras_[i].R.clone());
         detail::waveCorrect(rmats, wave_correct_kind_);
         for (size_t i = 0; i < cameras_.size(); ++i)
             cameras_[i].R = rmats[i];
+        STOP_TIME(Wave_Correct_time);
     }
 
     return OK;

@@ -58,7 +58,6 @@
 #  warning Detected X11 'Status' macro definition, it can cause build conflicts. Please, include this header before any X11 headers.
 #endif
 
-
 /**
 @defgroup stitching Images stitching
 
