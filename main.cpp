@@ -1,6 +1,7 @@
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/highgui.hpp"
 #include "opencv2/stitching.hpp"
+#include "opencv2/core/ocl.hpp"
 
 #include <thread>
 #include <iostream>
@@ -53,26 +54,38 @@ Mat stitching(vector<Mat> imgs)
     Mat output;
     Ptr<Stitcher> stitcher = Stitcher::create(Stitcher::PANORAMA, try_gpu);
 
+	stitcher->setRegistrationResol(0.5);
+	stitcher->setSeamEstimationResol(0.1);
+	stitcher->setCompositingResol(Stitcher::ORIG_RESOL);
+	stitcher->setPanoConfidenceThresh(1.0);
+	stitcher->setWaveCorrection(true);
+	stitcher->setWaveCorrectKind(detail::WAVE_CORRECT_HORIZ);
+
     if(try_gpu)
     {
-
+		#ifdef HAVE_OPENCV_XFEATURES2D
+		stitcher->setFeaturesFinder(makePtr<detail::SurfFeaturesFinderGpu>());		//GPU
+		#endif
+		stitcher->setFeaturesMatcher(makePtr<detail::BestOf2NearestMatcher>(true));
+		stitcher->setBundleAdjuster(makePtr<detail::BundleAdjusterRay>());
+		#ifdef HAVE_OPENCV_CUDAWARPING
+		stitcher->setWarper(makePtr<SphericalWarperGpu>());							//GPU
+		#endif	
+		stitcher->setExposureCompensator(makePtr<detail::BlocksGainCompensator>());
+		stitcher->setSeamFinder(makePtr<detail::VoronoiSeamFinder>());
+		#if defined(HAVE_OPENCV_CUDAARITHM) && defined(HAVE_OPENCV_CUDAWARPING)
+		stitcher->setBlender(makePtr<detail::MultiBandBlender>(true));				//GPU
+		#endif	
     }
     else
     {
-        stitcher->setRegistrationResol(0.5);
-        stitcher->setSeamEstimationResol(0.1);
-        stitcher->setCompositingResol(Stitcher::ORIG_RESOL);
-        stitcher->setPanoConfidenceThresh(1.0);
-        stitcher->setWaveCorrection(true);
-        stitcher->setWaveCorrectKind(detail::WAVE_CORRECT_HORIZ);
-
         stitcher->setFeaturesFinder(makePtr<detail::OrbFeaturesFinder>());
-        stitcher->setFeaturesMatcher(makePtr<detail::BestOf2NearestMatcher>(try_gpu));
+        stitcher->setFeaturesMatcher(makePtr<detail::BestOf2NearestMatcher>(false));
         stitcher->setBundleAdjuster(makePtr<detail::BundleAdjusterRay>());
         stitcher->setWarper(makePtr<SphericalWarper>());
         stitcher->setExposureCompensator(makePtr<detail::BlocksGainCompensator>());
         stitcher->setSeamFinder(makePtr<detail::VoronoiSeamFinder>());
-        stitcher->setBlender(makePtr<detail::MultiBandBlender>());
+		stitcher->setBlender(makePtr<detail::MultiBandBlender>(false));
     }
 
     Stitcher::Status status = stitcher->stitch(imgs, output);
@@ -82,6 +95,11 @@ Mat stitching(vector<Mat> imgs)
 
 void stitcher_thread(int idx)
 {
+	if (try_gpu)
+	{
+		ocl::setUseOpenCL(false);
+		cuda::setDevice(idx);
+	}
     while(true)
     {
         thread_args th_arg;
