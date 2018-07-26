@@ -63,7 +63,7 @@ Mat stitching(vector<Mat> imgs)
 
     if(try_gpu)
     {
-		#if defined(HAVE_OPENCV_XFEATURES2D) && defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+		#if defined(HAVE_OPENCV_XFEATURES2D) && defined(HAVE_OPENCV_CUDALEGACY)
 		stitcher->setFeaturesFinder(makePtr<detail::SurfFeaturesFinderGpu>());		//GPU
 		#endif
 		stitcher->setFeaturesMatcher(makePtr<detail::BestOf2NearestMatcher>(true));
