@@ -23,32 +23,32 @@ using namespace moodycamel;
 #define DEBUG_PRINT_OUT(x)
 #endif
 
+#define NUMBER_OF_THREAD 4
 #define QUEUE_SIZE 500
 #define TEST_COUNT 4
 bool try_gpu = false;
 
+// Stitcher thread's input queue structure 
 class thread_args
 {
     public :
     vector<Mat> imgs;
 };
 
+// Stitcher thread's output queue structure
 class thread_output
 {
     public :
     Mat pano;
 };
 
-BlockingReaderWriterQueue<thread_args> th_arg0(QUEUE_SIZE);
-BlockingReaderWriterQueue<thread_args> th_arg1(QUEUE_SIZE);
-BlockingReaderWriterQueue<thread_args> th_arg2(QUEUE_SIZE);
-BlockingReaderWriterQueue<thread_args> th_arg3(QUEUE_SIZE);
+// Stitcher thread's input queue structure queue
+BlockingReaderWriterQueue<thread_args>      th_arg[NUMBER_OF_THREAD];
+// Stitcher thread's output queue structure queue
+BlockingReaderWriterQueue<thread_output>    th_out[NUMBER_OF_THREAD];
 
-BlockingReaderWriterQueue<thread_output> th_out0(QUEUE_SIZE);
-BlockingReaderWriterQueue<thread_output> th_out1(QUEUE_SIZE);
-BlockingReaderWriterQueue<thread_output> th_out2(QUEUE_SIZE);
-BlockingReaderWriterQueue<thread_output> th_out3(QUEUE_SIZE);
-
+// Stitcher module implementation
+// create stitcher instance, setup, stitch frames
 Mat stitching(vector<Mat> imgs)
 {
     Mat output;
@@ -93,6 +93,8 @@ Mat stitching(vector<Mat> imgs)
     return output;
 }
 
+// Stitcher thread
+// wait input queue, stitch, push to output queue
 void stitcher_thread(int idx)
 {
 	if (try_gpu)
@@ -102,53 +104,21 @@ void stitcher_thread(int idx)
 	}
     while(true)
     {
-        thread_args th_arg;
+        thread_args th_arg_t;
 
-        switch(idx)
-        {
-            case 0:
-            th_arg0.wait_dequeue(th_arg);
-            break;
-
-            case 1:
-            th_arg1.wait_dequeue(th_arg);
-            break;
-
-            case 2:
-            th_arg2.wait_dequeue(th_arg);
-            break;
-
-            case 3:
-            th_arg3.wait_dequeue(th_arg);
-            break;
-        }
+        th_arg[idx].wait_dequeue(th_arg_t);
 
         DEBUG_PRINT_OUT("Thread number: " << idx << " start stitching");
-        thread_output th_out;
-        th_out.pano = stitching(th_arg.imgs);
+        thread_output th_out_t;
+        th_out_t.pano = stitching(th_arg_t.imgs);
 
         DEBUG_PRINT_OUT("Thread number: " << idx << " push output to queue");
-        switch(idx)
-        {
-            case 0:
-            th_out0.enqueue(th_out);
-            break;
-
-            case 1:
-            th_out1.enqueue(th_out);
-            break;
-            
-            case 2:
-            th_out2.enqueue(th_out);
-            break;
-            
-            case 3:
-            th_out3.enqueue(th_out);
-            break;
-        }
+        th_out[idx].enqueue(th_out_t);
     }
 }
 
+// main thread
+// prepare video, create threads and queues, put frames to queue and wait output, show it
 int main(int argc, char* argv[])
 {
     DEBUG_PRINT_OUT("start");
@@ -158,10 +128,9 @@ int main(int argc, char* argv[])
 
     vector<Mat> output;
 
-    thread thread0(stitcher_thread, 0);
-    thread thread1(stitcher_thread, 1);
-    thread thread2(stitcher_thread, 2);
-    thread thread3(stitcher_thread, 3);
+    thread stitch_thread[NUMBER_OF_THREAD];
+    for(int i = 0; i < NUMBER_OF_THREAD; i++)
+        stitch_thread[i] = thread(stitcher_thread, i);
 
     vector<Mat> vids(3);
         
@@ -182,60 +151,27 @@ int main(int argc, char* argv[])
         
         vector<Mat> vids(3);
         
-        thread_args th_arg;
+        thread_args th_arg_t;
         Mat tmp;
         vid0 >> tmp;
-        th_arg.imgs.push_back(tmp);
+        th_arg_t.imgs.push_back(tmp);
         vid1 >> tmp;
-        th_arg.imgs.push_back(tmp);
+        th_arg_t.imgs.push_back(tmp);
         vid2 >> tmp;
-        th_arg.imgs.push_back(tmp);
+        th_arg_t.imgs.push_back(tmp);
 
-        switch(capture_count % 4)
-        {
-            case 0:
-            th_arg0.enqueue(th_arg);
-            break;
-
-            case 1:
-            th_arg1.enqueue(th_arg);
-            break;
-            
-            case 2:
-            th_arg2.enqueue(th_arg);
-            break;
-            
-            case 3:
-            th_arg3.enqueue(th_arg);
-            break;
-        }
+        th_arg[capture_count % 4].enqueue(th_arg_t);
 
         capture_count++;
     }
 
     for(int i = 0; i < capture_count; i++)
     {
-        thread_output th_out;
-        switch(i % 4)
-        {
-            case 0:
-            th_out0.wait_dequeue(th_out);
-            break;
+        thread_output th_out_t;
 
-            case 1:
-            th_out1.wait_dequeue(th_out);
-            break;
-            
-            case 2:
-            th_out2.wait_dequeue(th_out);
-            break;
-            
-            case 3:
-            th_out3.wait_dequeue(th_out);
-            break;
-        }
+        th_out[i % 4].wait_dequeue(th_out_t);
 
-        output.push_back(th_out.pano);
+        output.push_back(th_out_t.pano);
     }
 
     for(int i = 0; i < output.size(); i++)
