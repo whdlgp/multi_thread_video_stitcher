@@ -6,6 +6,7 @@
 
 #include <thread>
 #include <iostream>
+#include <atomic>
 
 #include "atomicops.h"
 #include "readerwriterqueue.h"
@@ -16,10 +17,16 @@ using namespace std;
 using namespace cv;
 using namespace moodycamel;
 
+// Options for threading 
 #define NUMBER_OF_THREAD 4
 #define QUEUE_SIZE 500
 #define TEST_COUNT 4
+
+// Option for CUDA implementation
 bool try_gpu = false;
+
+// Quit flag for threads
+atomic_flag is_quit[NUMBER_OF_THREAD] = {ATOMIC_FLAG_INIT, };
 
 // Stitcher thread's input queue structure 
 class thread_args
@@ -103,25 +110,30 @@ void stitcher_thread(int idx)
 		ocl::setUseOpenCL(false);
 		cuda::setDevice(idx);
 	}
-    while(true)
+    // check quit flag
+    while(is_quit[idx].test_and_set())
     {
         thread_args th_arg_t;
 
-        th_arg[idx].wait_dequeue(th_arg_t);
+        //check input queue with timeout
+        if(th_arg[idx].wait_dequeue_timed(th_arg_t, chrono::milliseconds(5)))
+        {
+            DEBUG_PRINT_OUT("Thread number: " << idx << " start stitching");
+            thread_output th_out_t;
+            th_out_t.pano = stitching(th_arg_t.imgs);
 
-        DEBUG_PRINT_OUT("Thread number: " << idx << " start stitching");
-        thread_output th_out_t;
-        th_out_t.pano = stitching(th_arg_t.imgs);
-
-        DEBUG_PRINT_OUT("Thread number: " << idx << " push output to queue");
-        th_out[idx].enqueue(th_out_t);
+            DEBUG_PRINT_OUT("Thread number: " << idx << " push output to queue");
+            th_out[idx].enqueue(th_out_t);
+        }
     }
+    DEBUG_PRINT_OUT("Thread number: " << idx << " quit");
 }
 
 // main thread
 // prepare video, create threads and queues, put frames to queue and wait output, show it
 int main(int argc, char* argv[])
 {
+    // read videos
     DEBUG_PRINT_OUT("start");
     VideoCapture vid0("videofile0.avi");
     VideoCapture vid1("videofile1.avi");
@@ -129,10 +141,15 @@ int main(int argc, char* argv[])
 
     vector<Mat> output;
 
+    // create threads and quit flags
     thread stitch_thread[NUMBER_OF_THREAD];
     for(int i = 0; i < NUMBER_OF_THREAD; i++)
+    {
+        is_quit[i].test_and_set();
         stitch_thread[i] = thread(stitcher_thread, i);
+    }
 
+    // first stitching will do in main thread
     vector<Mat> vids(3);
         
     vid0 >> vids[0];
@@ -145,6 +162,8 @@ int main(int argc, char* argv[])
     DEBUG_PRINT_OUT("push to output queue");
     output.push_back(pano);
 
+    // After first frame stitching done, next frames will be stitched with multi-thread 
+    // read frames and push it to thread input queues
     int capture_count = 0;
     while(capture_count < TEST_COUNT)
     {
@@ -166,6 +185,7 @@ int main(int argc, char* argv[])
         capture_count++;
     }
 
+    // wait for threads output queue
     for(int i = 0; i < capture_count; i++)
     {
         thread_output th_out_t;
@@ -175,6 +195,15 @@ int main(int argc, char* argv[])
         output.push_back(th_out_t.pano);
     }
 
+    // It seams all done, quit all threads
+    for(int i = 0; i < NUMBER_OF_THREAD; i++)
+    {
+        is_quit[i].clear();
+        stitch_thread[i].join();
+    }
+    DEBUG_PRINT_OUT("All stitch threads join\n");
+
+    // check outputs of stitcher
     for(int i = 0; i < output.size(); i++)
     {
         Mat result;
