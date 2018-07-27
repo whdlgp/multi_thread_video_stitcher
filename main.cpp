@@ -18,12 +18,13 @@ using namespace cv;
 using namespace moodycamel;
 
 // Options for threading 
-#define NUMBER_OF_THREAD 4
+#define NUMBER_OF_GPU 4
+#define NUMBER_OF_THREAD NUMBER_OF_GPU * 8
 #define QUEUE_SIZE 500
-#define TEST_COUNT 4
+#define TEST_COUNT NUMBER_OF_THREAD * 10
 
 // Option for CUDA implementation
-bool try_gpu = false;
+bool try_gpu = true;
 
 // Quit flag for threads
 atomic_flag is_quit[NUMBER_OF_THREAD] = {ATOMIC_FLAG_INIT, };
@@ -107,8 +108,9 @@ void stitcher_thread(int idx)
 {
 	if (try_gpu)
 	{
+		int idx_modula = idx % NUMBER_OF_GPU;
 		ocl::setUseOpenCL(false);
-		cuda::setDevice(idx);
+		cuda::setDevice(idx_modula);
 	}
     // check quit flag
     while(is_quit[idx].test_and_set())
@@ -133,6 +135,8 @@ void stitcher_thread(int idx)
 // prepare video, create threads and queues, put frames to queue and wait output, show it
 int main(int argc, char* argv[])
 {
+	START_TIME(Total_Stitch_time);
+
     // read videos
     DEBUG_PRINT_OUT("start");
     VideoCapture vid0("videofile0.avi");
@@ -208,11 +212,14 @@ int main(int argc, char* argv[])
     {
         Mat result;
         output[i].convertTo(result, CV_8UC1);
-        resize(result, result, Size(1280, 240));
-        imshow("stitch output", output[i]);
+        resize(result, result, output[0].size());
+        imshow("stitch output", result);
         waitKey(0);
     }
 
     DEBUG_PRINT_OUT("stitching completed successfully\n");
+	STOP_TIME(Total_Stitch_time);
+	DEBUG_PRINT_OUT("Stitched frames : " << output.size());
+	DEBUG_PRINT_OUT("Stitched Frames per sec : " << (output.size()*1.0f) / (Total_Stitch_time/getTickFrequency()*1.0f));
     return 0;
 }
