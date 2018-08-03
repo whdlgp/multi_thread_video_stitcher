@@ -271,6 +271,18 @@ public:
     std::vector<int> component() const { return indices_; }
     std::vector<detail::CameraParams> cameras() const { return cameras_; }
     CV_WRAP double workScale() const { return work_scale_; }
+    CV_WRAP double seamScale() const { return seam_scale_; }
+    CV_WRAP double seamWorkAspect() const { return seam_work_aspect_; }
+    CV_WRAP double warpedImageScale() const { return warped_image_scale_; }
+    std::vector<cv::Size> fullImageSize() { return full_img_sizes_; }
+    void set_workScale(double scale) { work_scale_ = scale; }
+    void set_seamScale(double scale) { seam_scale_ = scale; }
+    void set_seamWorkAspect(double scale) { seam_work_aspect_ = scale; }
+    void set_warpedImageScale(double scale) { warped_image_scale_ = scale; }
+    void set_cameras(std::vector<detail::CameraParams> &cameras) { cameras_ = cameras; }
+    void set_imgs(InputArrayOfArrays imgs) { imgs.getUMatVector(imgs_); }
+    void set_indices(std::vector<int> &indices) { indices_ = indices; }
+    void set_fullImageSize(std::vector<cv::Size> &full_img_sizes) { full_img_sizes_ = full_img_sizes; }
 
 private:
     //Stitcher() {}
