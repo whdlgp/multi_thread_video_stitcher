@@ -19,9 +19,9 @@ using namespace moodycamel;
 
 // Options for threading 
 #define NUMBER_OF_GPU 4
-#define NUMBER_OF_THREAD NUMBER_OF_GPU * 8
+#define NUMBER_OF_THREAD NUMBER_OF_GPU * 1
 #define QUEUE_SIZE 500
-#define TEST_COUNT NUMBER_OF_THREAD * 10
+#define TEST_COUNT NUMBER_OF_THREAD * 15
 
 // Option for CUDA implementation
 bool try_gpu = true;
@@ -108,8 +108,8 @@ void stitcher_thread(int idx)
 {
 	if (try_gpu)
 	{
-		int idx_modula = idx % NUMBER_OF_GPU;
 		ocl::setUseOpenCL(false);
+		int idx_modula = idx % NUMBER_OF_GPU;
 		cuda::setDevice(idx_modula);
 	}
     // check quit flag
@@ -135,6 +135,10 @@ void stitcher_thread(int idx)
 // prepare video, create threads and queues, put frames to queue and wait output, show it
 int main(int argc, char* argv[])
 {
+	if (try_gpu)
+	{
+		ocl::setUseOpenCL(false);
+	}
 	START_TIME(Total_Stitch_time);
 
     // read videos
@@ -178,11 +182,11 @@ int main(int argc, char* argv[])
         thread_args th_arg_t;
         Mat tmp;
         vid0 >> tmp;
-        th_arg_t.imgs.push_back(tmp);
+        th_arg_t.imgs.push_back(tmp.clone());
         vid1 >> tmp;
-        th_arg_t.imgs.push_back(tmp);
+        th_arg_t.imgs.push_back(tmp.clone());
         vid2 >> tmp;
-        th_arg_t.imgs.push_back(tmp);
+        th_arg_t.imgs.push_back(tmp.clone());
 
         th_arg[capture_count % NUMBER_OF_THREAD].enqueue(th_arg_t);
 
