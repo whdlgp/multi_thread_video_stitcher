@@ -184,7 +184,7 @@ int main(int argc, char* argv[])
         vid2 >> tmp;
         th_arg_t.imgs.push_back(tmp);
 
-        th_arg[capture_count % 4].enqueue(th_arg_t);
+        th_arg[capture_count % NUMBER_OF_THREAD].enqueue(th_arg_t);
 
         capture_count++;
     }
@@ -194,7 +194,7 @@ int main(int argc, char* argv[])
     {
         thread_output th_out_t;
 
-        th_out[i % 4].wait_dequeue(th_out_t);
+        th_out[i % NUMBER_OF_THREAD].wait_dequeue(th_out_t);
 
         output.push_back(th_out_t.pano);
     }
