@@ -50,7 +50,7 @@ BlockingReaderWriterQueue<thread_output>    th_out[NUMBER_OF_THREAD];
 
 // Stitcher module implementation
 // create stitcher instance, setup, stitch frames
-Mat stitching(vector<Mat> imgs)
+Mat stitching(vector<Mat> &imgs)
 {
     START_TIME(Create_stitcher);
     Mat output;
@@ -139,7 +139,6 @@ int main(int argc, char* argv[])
 	{
 		ocl::setUseOpenCL(false);
 	}
-	START_TIME(Total_Stitch_time);
 
     // read videos
     DEBUG_PRINT_OUT("start");
@@ -163,6 +162,8 @@ int main(int argc, char* argv[])
     vid0 >> vids[0];
     vid1 >> vids[1];
     vid2 >> vids[2];
+
+	START_TIME(Total_Stitch_time);
 
     DEBUG_PRINT_OUT("start stitching first frame");
     Mat pano = stitching(vids);
@@ -211,6 +212,11 @@ int main(int argc, char* argv[])
     }
     DEBUG_PRINT_OUT("All stitch threads join\n");
 
+	DEBUG_PRINT_OUT("stitching completed successfully\n");
+	STOP_TIME(Total_Stitch_time);
+	DEBUG_PRINT_OUT("Stitched frames : " << output.size());
+	DEBUG_PRINT_OUT("Stitched Frames per sec : " << (output.size()*1.0f) / (Total_Stitch_time / getTickFrequency()*1.0f));
+
     // check outputs of stitcher
     for(int i = 0; i < output.size(); i++)
     {
@@ -220,10 +226,5 @@ int main(int argc, char* argv[])
         imshow("stitch output", result);
         waitKey(0);
     }
-
-    DEBUG_PRINT_OUT("stitching completed successfully\n");
-	STOP_TIME(Total_Stitch_time);
-	DEBUG_PRINT_OUT("Stitched frames : " << output.size());
-	DEBUG_PRINT_OUT("Stitched Frames per sec : " << (output.size()*1.0f) / (Total_Stitch_time/getTickFrequency()*1.0f));
     return 0;
 }
