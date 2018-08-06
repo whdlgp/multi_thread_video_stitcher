@@ -53,6 +53,10 @@
 #include "opencv2/stitching/detail/blenders.hpp"
 #include "opencv2/stitching/detail/camera.hpp"
 
+#define STITCHER_DEBUG_IMWRTIE true
+#if STITCHER_DEBUG_IMWRTIE == true
+#include "opencv2/highgui.hpp"
+#endif
 
 #if defined(Status)
 #  warning Detected X11 'Status' macro definition, it can cause build conflicts. Please, include this header before any X11 headers.
@@ -283,7 +287,9 @@ public:
     void set_imgs(InputArrayOfArrays imgs) { imgs.getUMatVector(imgs_); }
     void set_indices(std::vector<int> &indices) { indices_ = indices; }
     void set_fullImageSize(std::vector<cv::Size> &full_img_sizes) { full_img_sizes_ = full_img_sizes; }
-
+#if STITCHER_DEBUG_IMWRTIE == true
+	std::vector<cv::Mat> debugMat() { return debug_mat; }
+#endif
 private:
     //Stitcher() {}
 
@@ -320,6 +326,10 @@ private:
     double seam_scale_;
     double seam_work_aspect_;
     double warped_image_scale_;
+
+#if STITCHER_DEBUG_IMWRTIE == true
+	std::vector<cv::Mat> debug_mat;
+#endif
 };
 
 CV_EXPORTS_W Ptr<Stitcher_mod> createStitcher(bool try_use_gpu = false);

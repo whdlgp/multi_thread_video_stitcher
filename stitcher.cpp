@@ -371,6 +371,12 @@ Stitcher_mod::Status Stitcher_mod::composePanorama(InputArrayOfArrays images, Ou
         // Warp the current image
         w->warp(img, K, cameras_[img_idx].R, INTER_LINEAR, BORDER_REFLECT, img_warped);
 
+#if STITCHER_DEBUG_IMWRTIE == true
+		Mat img_mat;
+		img_warped.copyTo(img_mat);
+		debug_mat.push_back(img_mat);
+#endif
+
         // Warp the current image mask
         mask.create(img_size, CV_8U);
         mask.setTo(Scalar::all(255));

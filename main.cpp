@@ -7,6 +7,9 @@
 #include <thread>
 #include <iostream>
 #include <atomic>
+#if STITCHER_DEBUG_IMWRTIE == true
+#include <sstream>
+#endif
 
 #include "atomicops.h"
 #include "readerwriterqueue.h"
@@ -26,6 +29,14 @@ using namespace moodycamel;
 // Option for CUDA implementation
 bool try_gpu = true;
 
+// Option for video output
+#define VIDEO_OUT true
+#if VIDEO_OUT == true
+static VideoWriter pano_out;
+#define VIDEO_OUT_NAME "pano_out.avi"
+#define VIDEO_OUT_FPS 30
+#endif
+
 // Quit flag for threads
 atomic_flag is_quit[NUMBER_OF_THREAD] = {ATOMIC_FLAG_INIT, };
 
@@ -41,6 +52,9 @@ class thread_output
 {
     public :
     Mat pano;
+#if STITCHER_DEBUG_IMWRTIE == true
+	vector<Mat> debug_mat;
+#endif
 };
 
 // Stitcher thread's input queue structure queue
@@ -102,6 +116,67 @@ Mat stitching(vector<Mat> &imgs)
     return output;
 }
 
+#if STITCHER_DEBUG_IMWRTIE == true
+//return debug matrix with output panorama
+Mat stitching(vector<Mat> &imgs, vector<Mat> &debug_mat)
+{
+	START_TIME(Create_stitcher);
+	Mat output;
+	Ptr<Stitcher_mod> stitcher = Stitcher_mod::create(Stitcher_mod::PANORAMA, try_gpu);
+	STOP_TIME(Create_stitcher);
+
+	START_TIME(Setup_stitcher_params);
+	stitcher->setRegistrationResol(0.5);
+	stitcher->setSeamEstimationResol(0.1);
+	stitcher->setCompositingResol(Stitcher_mod::ORIG_RESOL);
+	stitcher->setPanoConfidenceThresh(1.0);
+	stitcher->setWaveCorrection(true);
+	stitcher->setWaveCorrectKind(detail::WAVE_CORRECT_HORIZ);
+	STOP_TIME(Setup_stitcher_params);
+
+	START_TIME(Setup_stitcher_modules);
+	if (try_gpu)
+	{
+#if defined(HAVE_OPENCV_XFEATURES2D) && defined(HAVE_OPENCV_CUDALEGACY)
+		stitcher->setFeaturesFinder(makePtr<detail::SurfFeaturesFinderGpu>());		//GPU
+#endif
+		stitcher->setFeaturesMatcher(makePtr<detail::BestOf2NearestMatcher>(true));
+		stitcher->setBundleAdjuster(makePtr<detail::BundleAdjusterRay>());
+#ifdef HAVE_OPENCV_CUDAWARPING
+		stitcher->setWarper(makePtr<SphericalWarperGpu>());							//GPU
+#endif	
+		stitcher->setExposureCompensator(makePtr<detail::BlocksGainCompensator>());
+		stitcher->setSeamFinder(makePtr<detail::VoronoiSeamFinder>());
+#if defined(HAVE_OPENCV_CUDAARITHM) && defined(HAVE_OPENCV_CUDAWARPING)
+		stitcher->setBlender(makePtr<detail::MultiBandBlender>(true));				//GPU
+#endif	
+	}
+	else
+	{
+		stitcher->setFeaturesFinder(makePtr<detail::OrbFeaturesFinder>());
+		stitcher->setFeaturesMatcher(makePtr<detail::BestOf2NearestMatcher>(false));
+		stitcher->setBundleAdjuster(makePtr<detail::BundleAdjusterRay>());
+		stitcher->setWarper(makePtr<SphericalWarper>());
+		stitcher->setExposureCompensator(makePtr<detail::BlocksGainCompensator>());
+		stitcher->setSeamFinder(makePtr<detail::VoronoiSeamFinder>());
+		stitcher->setBlender(makePtr<detail::MultiBandBlender>(false));
+	}
+	STOP_TIME(Setup_stitcher_modules);
+
+	START_TIME(Stitch_Time);
+	Stitcher_mod::Status status = stitcher->stitch(imgs, output);
+	STOP_TIME(Stitch_Time);
+
+	vector<Mat> tmp = stitcher->debugMat();
+	for (int i = 0; i < tmp.size(); i++)
+	{
+		debug_mat.push_back(tmp[i].clone());
+	}
+
+	return output;
+}
+#endif
+
 // Stitcher thread
 // wait input queue, stitch, push to output queue
 void stitcher_thread(int idx)
@@ -122,7 +197,11 @@ void stitcher_thread(int idx)
         {
             DEBUG_PRINT_OUT("Thread number: " << idx << " start stitching");
             thread_output th_out_t;
-            th_out_t.pano = stitching(th_arg_t.imgs);
+#if STITCHER_DEBUG_IMWRTIE == true
+			th_out_t.pano = stitching(th_arg_t.imgs, th_out_t.debug_mat);
+#else
+			th_out_t.pano = stitching(th_arg_t.imgs);
+#endif
 
             DEBUG_PRINT_OUT("Thread number: " << idx << " push output to queue");
             th_out[idx].enqueue(th_out_t);
@@ -202,6 +281,20 @@ int main(int argc, char* argv[])
         th_out[i % NUMBER_OF_THREAD].wait_dequeue(th_out_t);
 
         output.push_back(th_out_t.pano);
+#if STITCHER_DEBUG_IMWRTIE == true
+		stringstream debug_name;
+		debug_name << "debug " << i << 0 << ".jpg";
+		imwrite(debug_name.str(), th_out_t.debug_mat[0]);
+		debug_name.str("");
+
+		debug_name << "debug " << i << 1 << ".jpg";
+		imwrite(debug_name.str(), th_out_t.debug_mat[1]);
+		debug_name.str("");
+
+		debug_name << "debug " << i << 2 << ".jpg";
+		imwrite(debug_name.str(), th_out_t.debug_mat[2]);
+		debug_name.str("");
+#endif
     }
 
     // It seams all done, quit all threads
@@ -217,6 +310,20 @@ int main(int argc, char* argv[])
 	DEBUG_PRINT_OUT("Stitched frames : " << output.size());
 	DEBUG_PRINT_OUT("Stitched Frames per sec : " << (output.size()*1.0f) / (Total_Stitch_time / getTickFrequency()*1.0f));
 
+#if VIDEO_OUT == true
+	//prepare output video
+	Size first_frame_size = output[0].size();
+	pano_out.open(VIDEO_OUT_NAME, CV_FOURCC('M', 'P', '4', '2'), VIDEO_OUT_FPS, first_frame_size, true);
+
+	for (int i = 0; i < output.size(); i++)
+	{
+		Mat result;
+		output[i].convertTo(result, CV_8UC1);
+		resize(result, result, first_frame_size);
+
+		pano_out << result;
+	}
+#else
     // check outputs of stitcher
     for(int i = 0; i < output.size(); i++)
     {
@@ -226,5 +333,6 @@ int main(int argc, char* argv[])
         imshow("stitch output", result);
         waitKey(0);
     }
+#endif
     return 0;
 }
