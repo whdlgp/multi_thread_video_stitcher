@@ -22,9 +22,9 @@ using namespace moodycamel;
 
 // Options for threading 
 #define NUMBER_OF_GPU 4
-#define NUMBER_OF_THREAD NUMBER_OF_GPU * 1
+#define NUMBER_OF_THREAD (NUMBER_OF_GPU * 1)
 #define QUEUE_SIZE 500
-#define TEST_COUNT NUMBER_OF_THREAD * 15
+#define TEST_COUNT (NUMBER_OF_THREAD * 1)
 
 // Option for CUDA implementation
 bool try_gpu = true;
