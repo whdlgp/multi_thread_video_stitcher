@@ -233,25 +233,30 @@ Stitcher_mod::Status Stitcher_mod::estimateTransform(InputArrayOfArrays images, 
 
 Stitcher_mod::Status Stitcher_mod::estimateTransformOpticalFlow(InputArrayOfArrays pre_images, std::vector<detail::MatchesInfo> &pre_matches, std::vector<detail::CameraParams> &pre_cameras, InputArrayOfArrays current_images, const std::vector<std::vector<Rect> > &rois)
 {
-    current_images.getUMatVector(imgs_);
+	std::vector<UMat> imgs_tmp;
+    current_images.getUMatVector(imgs_tmp);
+	imgs_.clear();
+	imgs_.resize(pre_imgs_.size());
     pre_images.getUMatVector(pre_imgs_);
     pre_matches_ = pre_matches;
     pre_cameras_ = pre_cameras;
     rois_ = rois;
 
-    for(int i = 0; i < imgs_.size(); i++)
+    for(int i = 0; i < imgs_tmp.size(); i++)
     {
         START_TIME(find_homography_with_optical_flow);
         std::vector<Mat> images;
-        images.push_back(imgs_[i].getMat(ACCESS_READ));
+        images.push_back(imgs_tmp[i].getMat(ACCESS_READ));
         images.push_back(pre_imgs_[i].getMat(ACCESS_READ));
 
         Mat H = optical_flow_homography_find(images);
         STOP_TIME(find_homography_with_optical_flow);
-
-        START_TIME(warp_with_optical_flow_homography);
-        warpPerspective(imgs_[i], imgs_[i], H, pre_imgs_[i].size());
-        STOP_TIME(warp_with_optical_flow_homography);
+		
+		START_TIME(warp_with_optical_flow_homography);
+		Mat opt_flow_warped;
+		warpPerspective(imgs_tmp[i], opt_flow_warped, H, pre_imgs_[i].size());
+		imgs_.push_back(opt_flow_warped.getUMat(ACCESS_RW).clone());
+		STOP_TIME(warp_with_optical_flow_homography);
     }
 
     cameras_ = pre_cameras_;
