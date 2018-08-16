@@ -163,12 +163,16 @@ Mat stitching_first_frame(vector<Mat> &first_frames, vector<detail::CameraParams
 Mat stitching_optical_flow(vector<Mat> &prev_frames, vector<detail::MatchesInfo> &prev_match_infos, vector<detail::CameraParams> &prev_cameras
                             , vector<Mat> &current_frames)
 {
+    vector<Mat> prev_frames_, current_frames_;
+    deep_copy_vector_mat(prev_frames, prev_frames_);
+    deep_copy_vector_mat(current_frames, current_frames_);
+
     Ptr<Stitcher_mod> stitcher = stitcher_setup();
 
     START_TIME(Stitch_Time);
     Mat output;
-    Stitcher_mod::Status status = stitcher->estimateTransformOpticalFlow(prev_frames, prev_match_infos, prev_cameras
-                                                                        , current_frames, std::vector<std::vector<Rect> >());
+    Stitcher_mod::Status status = stitcher->estimateTransformOpticalFlow(prev_frames_, prev_match_infos, prev_cameras
+                                                                        , current_frames_, std::vector<std::vector<Rect> >());
 
     deep_copy_vector_mat(current_frames, prev_frames);
     prev_cameras = stitcher->cameras();
