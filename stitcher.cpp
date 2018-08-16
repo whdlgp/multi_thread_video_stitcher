@@ -93,6 +93,14 @@
 # include "opencv2/stitching/stitching_tegra.hpp"
 #endif
 
+#ifdef HAVE_OPENCV_CUDAIMGPROC
+#  include "opencv2/cudaimgproc.hpp"
+#endif
+
+#ifdef HAVE_OPENCV_CUDAOPTFLOW
+#  include "opencv2/cudaoptflow.hpp"
+#endif
+
 #include "debug_print.h"
 
 namespace cv {
@@ -132,6 +140,65 @@ cv::Mat optical_flow_homography_find(std::vector<cv::Mat> &images)
     // get homography
     Mat homogrpy = findHomography(good_track_point[0], good_track_point[1], RANSAC);
     return homogrpy;
+}
+
+static void download(const cuda::GpuMat& d_mat, std::vector<Point2f>& vec)
+{
+	vec.resize(d_mat.cols);
+	Mat mat(1, d_mat.cols, CV_32FC2, (void*)&vec[0]);
+	d_mat.download(mat);
+}
+
+static void download(const cuda::GpuMat& d_mat, std::vector<uchar>& vec)
+{
+	vec.resize(d_mat.cols);
+	Mat mat(1, d_mat.cols, CV_8UC1, (void*)&vec[0]);
+	d_mat.download(mat);
+}
+
+cv::Mat optical_flow_homography_find_gpu(std::vector<cv::Mat> &images)
+{
+	// converto to gray colormap
+	Mat cur_gray, pre_gray;
+	cvtColor(images[0], pre_gray, COLOR_BGR2GRAY);
+	cvtColor(images[1], cur_gray, COLOR_BGR2GRAY);
+	cur_gray = cur_gray(Range(0, pre_gray.rows), Range(0, pre_gray.cols));
+
+	// prepare for LK optical flow
+	// find feature point with goodFeaturesToTrack
+	Ptr<cuda::CornersDetector> detector = cuda::createGoodFeaturesToTrackDetector(pre_gray.type(), 500, 0.01, 10);
+
+	cuda::GpuMat pre_gray_gmat, cur_gray_gmat, track_point_gmat, detected_point_gmat, status_gmat;
+
+	pre_gray_gmat.upload(pre_gray);
+	cur_gray_gmat.upload(cur_gray);
+
+	detector->detect(pre_gray_gmat, track_point_gmat);
+
+	Ptr<cuda::SparsePyrLKOpticalFlow> d_pyrLK_sparse = cuda::SparsePyrLKOpticalFlow::create(Size(31, 31), 3, 20);
+	d_pyrLK_sparse->calc(pre_gray_gmat, cur_gray_gmat, track_point_gmat, detected_point_gmat, status_gmat);
+
+	std::vector<Point2f> track_point(track_point_gmat.cols);
+	download(track_point_gmat, track_point);
+
+	std::vector<Point2f> detected_point(detected_point_gmat.cols);
+	download(detected_point_gmat, detected_point);
+
+	std::vector<uchar> status(status_gmat.cols);
+	download(status_gmat, status);
+
+	std::vector<Point2f> good_track_point[2];
+	for (int i = 0; i < track_point.size(); i++)
+	{
+		if (status[i])
+		{
+			good_track_point[0].push_back(track_point[i]);
+			good_track_point[1].push_back(detected_point[i]);
+		}
+	}
+	// get homography
+	Mat homogrpy = findHomography(good_track_point[0], good_track_point[1], RANSAC);
+	return homogrpy;
 }
 
 Stitcher_mod Stitcher_mod::createDefault(bool try_use_gpu)
@@ -176,6 +243,17 @@ Stitcher_mod Stitcher_mod::createDefault(bool try_use_gpu)
     stitcher.seam_scale_ = 1;
     stitcher.seam_work_aspect_ = 1;
     stitcher.warped_image_scale_ = 1;
+
+	if (try_use_gpu)
+	{
+#ifdef HAVE_OPENCV_CUDALEGACY
+		stitcher.cuda_optical_flow = true;
+#else
+		stitcher.cuda_optical_flow = false;
+#endif
+	}
+	else
+		stitcher.cuda_optical_flow = false;
 
     return stitcher;
 }
@@ -243,19 +321,44 @@ Stitcher_mod::Status Stitcher_mod::estimateTransformOpticalFlow(InputArrayOfArra
     rois_ = rois;
 
     for(int i = 0; i < imgs_tmp.size(); i++)
-    {
-        START_TIME(find_homography_with_optical_flow);
-        std::vector<Mat> images;
-        images.push_back(imgs_tmp[i].getMat(ACCESS_READ));
-        images.push_back(pre_imgs_[i].getMat(ACCESS_READ));
+    {	
+		START_TIME(find_homography_with_optical_flow);
+		Mat H;
+		if (cuda_optical_flow)
+		{
+			std::vector<Mat> images;
+			images.push_back(imgs_tmp[i].getMat(ACCESS_READ));
+			images.push_back(pre_imgs_[i].getMat(ACCESS_READ));
 
-        Mat H = optical_flow_homography_find(images);
-        STOP_TIME(find_homography_with_optical_flow);
-		
+			H = optical_flow_homography_find_gpu(images);
+		}
+		else
+		{
+			std::vector<Mat> images;
+			images.push_back(imgs_tmp[i].getMat(ACCESS_READ));
+			images.push_back(pre_imgs_[i].getMat(ACCESS_READ));
+
+			H = optical_flow_homography_find(images);
+		}
+		STOP_TIME(find_homography_with_optical_flow);
+
 		START_TIME(warp_with_optical_flow_homography);
-		Mat opt_flow_warped;
-		warpPerspective(imgs_tmp[i], opt_flow_warped, H, pre_imgs_[i].size());
-		imgs_.push_back(opt_flow_warped.getUMat(ACCESS_RW).clone());
+		if (cuda_optical_flow)
+		{
+			cv::cuda::GpuMat opt_flow_warped;
+			cv::cuda::GpuMat input;
+			UMat output;
+			input.upload(imgs_tmp[i]);
+			cv::cuda::warpPerspective(input, opt_flow_warped, H, pre_imgs_[i].size());
+			opt_flow_warped.download(output);
+			imgs_.push_back(output.clone());
+		}
+		else
+		{
+			Mat opt_flow_warped;
+			cv::warpPerspective(imgs_tmp[i], opt_flow_warped, H, pre_imgs_[i].size());
+			imgs_.push_back(opt_flow_warped.getUMat(ACCESS_RW).clone());
+		}
 		STOP_TIME(warp_with_optical_flow_homography);
     }
 

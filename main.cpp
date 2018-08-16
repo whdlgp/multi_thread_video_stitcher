@@ -29,7 +29,7 @@ using namespace moodycamel;
 
 // Option for CUDA implementation
 bool try_gpu = true;
-bool use_ocl = false;
+bool use_ocl = true;
 
 // Option for Optical flow motion compensation
 #define USE_OPT_FLOW true

@@ -290,6 +290,7 @@ public:
     void set_imgs(InputArrayOfArrays imgs) { imgs.getUMatVector(imgs_); }
     void set_indices(std::vector<int> &indices) { indices_ = indices; }
     void set_fullImageSize(std::vector<cv::Size> &full_img_sizes) { full_img_sizes_ = full_img_sizes; }
+	void set_cuda_optical_flow(bool enable) { cuda_optical_flow = enable; }
 #if STITCHER_DEBUG_IMWRTIE == true
 	std::vector<cv::Mat> debugMat() { return debug_mat; }
 #endif
@@ -332,6 +333,7 @@ private:
     double seam_scale_;
     double seam_work_aspect_;
     double warped_image_scale_;
+	bool cuda_optical_flow;
 
 #if STITCHER_DEBUG_IMWRTIE == true
 	std::vector<cv::Mat> debug_mat;
