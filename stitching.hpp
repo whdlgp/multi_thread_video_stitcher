@@ -246,6 +246,8 @@ public:
      */
     Status estimateTransform(InputArrayOfArrays images, const std::vector<std::vector<Rect> > &rois);
 
+    Status estimateTransformOpticalFlow(InputArrayOfArrays pre_images, std::vector<detail::MatchesInfo> &pre_matches, std::vector<detail::CameraParams> &pre_cameras, InputArrayOfArrays current_images, const std::vector<std::vector<Rect> > &rois);
+
     /** @overload */
     CV_WRAP Status composePanorama(OutputArray pano);
     /** @brief These functions try to compose the given images (or images stored internally from the other function
@@ -279,6 +281,7 @@ public:
     CV_WRAP double seamWorkAspect() const { return seam_work_aspect_; }
     CV_WRAP double warpedImageScale() const { return warped_image_scale_; }
     std::vector<cv::Size> fullImageSize() { return full_img_sizes_; }
+    std::vector<detail::MatchesInfo> matchInfo() const { return pairwise_matches_; };
     void set_workScale(double scale) { work_scale_ = scale; }
     void set_seamScale(double scale) { seam_scale_ = scale; }
     void set_seamWorkAspect(double scale) { seam_work_aspect_ = scale; }
@@ -314,13 +317,16 @@ private:
     Ptr<detail::SeamFinder> seam_finder_;
     Ptr<detail::Blender> blender_;
 
+    std::vector<cv::UMat> pre_imgs_;
     std::vector<cv::UMat> imgs_;
     std::vector<std::vector<cv::Rect> > rois_;
     std::vector<cv::Size> full_img_sizes_;
     std::vector<detail::ImageFeatures> features_;
+    std::vector<detail::MatchesInfo> pre_matches_;
     std::vector<detail::MatchesInfo> pairwise_matches_;
     std::vector<cv::UMat> seam_est_imgs_;
     std::vector<int> indices_;
+    std::vector<detail::CameraParams> pre_cameras_;
     std::vector<detail::CameraParams> cameras_;
     double work_scale_;
     double seam_scale_;

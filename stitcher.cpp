@@ -67,6 +67,7 @@
 #include "opencv2/imgproc.hpp"
 #include "opencv2/features2d.hpp"
 #include "opencv2/calib3d.hpp"
+#include "opencv/cv.hpp"
 
 #ifdef HAVE_OPENCV_CUDAARITHM
 #  include "opencv2/cudaarithm.hpp"
@@ -95,6 +96,43 @@
 #include "debug_print.h"
 
 namespace cv {
+cv::Mat optical_flow_homography_find(std::vector<cv::Mat> &images)
+{
+    // converto to gray colormap
+    Mat cur_gray, pre_gray;
+    cvtColor(images[0], pre_gray, COLOR_BGR2GRAY);
+    cvtColor(images[1], cur_gray, COLOR_BGR2GRAY);
+    cur_gray = cur_gray(Range(0, pre_gray.rows), Range(0, pre_gray.cols));
+
+    // prepare for LK optical flow
+    std::vector<Point2f> track_point[2];
+    TermCriteria termcrit(TermCriteria::COUNT|TermCriteria::EPS,20,0.03);
+
+    std::vector<uchar> status;
+    std::vector<float> err;
+
+    // prepare for LK optical flow
+    // find feature point with goodFeaturesToTrack
+    goodFeaturesToTrack(cur_gray, track_point[0], 500, 0.01, 10);
+    cornerSubPix(cur_gray, track_point[0], Size(10, 10), Size(-1,-1), termcrit);
+
+    // calculate optical flow
+    calcOpticalFlowPyrLK(pre_gray, cur_gray, track_point[0], track_point[1], status, err, Size(31, 31),
+                                3, termcrit, 0, 0.001);
+
+    std::vector<Point2f> good_track_point[2];
+    for(int i = 0; i < track_point[0].size(); i++)
+    {
+        if(status[i])
+        {
+            good_track_point[0].push_back(track_point[0][i]);
+            good_track_point[1].push_back(track_point[1][i]);
+        }
+    }
+    // get homography
+    Mat homogrpy = findHomography(good_track_point[0], good_track_point[1], RANSAC);
+    return homogrpy;
+}
 
 Stitcher_mod Stitcher_mod::createDefault(bool try_use_gpu)
 {
@@ -193,7 +231,103 @@ Stitcher_mod::Status Stitcher_mod::estimateTransform(InputArrayOfArrays images, 
     return OK;
 }
 
+Stitcher_mod::Status Stitcher_mod::estimateTransformOpticalFlow(InputArrayOfArrays pre_images, std::vector<detail::MatchesInfo> &pre_matches, std::vector<detail::CameraParams> &pre_cameras, InputArrayOfArrays current_images, const std::vector<std::vector<Rect> > &rois)
+{
+    current_images.getUMatVector(imgs_);
+    pre_images.getUMatVector(pre_imgs_);
+    pre_matches_ = pre_matches;
+    pre_cameras_ = pre_cameras;
+    rois_ = rois;
 
+    for(int i = 0; i < imgs_.size(); i++)
+    {
+        std::vector<Mat> images;
+        images.push_back(imgs_[i].getMat(ACCESS_READ));
+        images.push_back(pre_imgs_[i].getMat(ACCESS_READ));
+
+        Mat H = optical_flow_homography_find(images);
+
+        warpPerspective(imgs_[i], imgs_[i], H, pre_imgs_[i].size());
+    }
+
+    cameras_ = pre_cameras_;
+
+    work_scale_ = 1;
+    seam_work_aspect_ = 1;
+    seam_scale_ = 1;
+    bool is_work_scale_set = false;
+    bool is_seam_scale_set = false;
+    UMat full_img, img;
+    features_.resize(imgs_.size());
+    seam_est_imgs_.resize(imgs_.size());
+    full_img_sizes_.resize(imgs_.size());
+
+    std::vector<UMat> feature_find_imgs(imgs_.size());
+    std::vector<std::vector<Rect> > feature_find_rois(rois_.size());
+
+    for (size_t i = 0; i < imgs_.size(); ++i)
+    {
+        full_img = imgs_[i];
+        full_img_sizes_[i] = full_img.size();
+
+        if (registr_resol_ < 0)
+        {
+            img = full_img;
+            work_scale_ = 1;
+            is_work_scale_set = true;
+        }
+        else
+        {
+            if (!is_work_scale_set)
+            {
+                work_scale_ = std::min(1.0, std::sqrt(registr_resol_ * 1e6 / full_img.size().area()));
+                is_work_scale_set = true;
+            }
+            START_TIME(Resize_in_work_scale);
+            resize(full_img, img, Size(), work_scale_, work_scale_, INTER_LINEAR_EXACT);
+            STOP_TIME(Resize_in_work_scale);
+        }
+        if (!is_seam_scale_set)
+        {
+            seam_scale_ = std::min(1.0, std::sqrt(seam_est_resol_ * 1e6 / full_img.size().area()));
+            seam_work_aspect_ = seam_scale_ / work_scale_;
+            is_seam_scale_set = true;
+        }
+
+        START_TIME(Resize_in_seam_scale);
+        resize(full_img, img, Size(), seam_scale_, seam_scale_, INTER_LINEAR_EXACT);
+        seam_est_imgs_[i] = img.clone();
+        STOP_TIME(Resize_in_seam_scale);
+    }
+    
+    // Find median focal length and use it as final image scale
+    std::vector<double> focals;
+    for (size_t i = 0; i < cameras_.size(); ++i)
+    {
+        //LOGLN("Camera #" << indices_[i] + 1 << ":\n" << cameras_[i].K());
+        focals.push_back(cameras_[i].focal);
+    }
+
+    std::sort(focals.begin(), focals.end());
+    if (focals.size() % 2 == 1)
+        warped_image_scale_ = static_cast<float>(focals[focals.size() / 2]);
+    else
+        warped_image_scale_ = static_cast<float>(focals[focals.size() / 2 - 1] + focals[focals.size() / 2]) * 0.5f;
+
+    if (do_wave_correct_)
+    {
+        START_TIME(Wave_Correct_time);
+        std::vector<Mat> rmats;
+        for (size_t i = 0; i < cameras_.size(); ++i)
+            rmats.push_back(cameras_[i].R.clone());
+        detail::waveCorrect(rmats, wave_correct_kind_);
+        for (size_t i = 0; i < cameras_.size(); ++i)
+            cameras_[i].R = rmats[i];
+        STOP_TIME(Wave_Correct_time);
+    }
+
+    return OK;
+}
 
 Stitcher_mod::Status Stitcher_mod::composePanorama(OutputArray pano)
 {
@@ -558,7 +692,6 @@ Stitcher_mod::Status Stitcher_mod::matchImages()
 
     return OK;
 }
-
 
 Stitcher_mod::Status Stitcher_mod::estimateCameraParams()
 {
