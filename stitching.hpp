@@ -53,7 +53,7 @@
 #include "opencv2/stitching/detail/blenders.hpp"
 #include "opencv2/stitching/detail/camera.hpp"
 
-#define STITCHER_DEBUG_IMWRTIE true
+#define STITCHER_DEBUG_IMWRTIE false
 #if STITCHER_DEBUG_IMWRTIE == true
 #include "opencv2/highgui.hpp"
 #endif

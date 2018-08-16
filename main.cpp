@@ -29,6 +29,7 @@ using namespace moodycamel;
 
 // Option for CUDA implementation
 bool try_gpu = true;
+bool use_ocl = false;
 
 // Option for Optical flow motion compensation
 #define USE_OPT_FLOW true
@@ -221,7 +222,6 @@ void stitcher_thread(int idx)
 {
 	if (try_gpu)
 	{
-		ocl::setUseOpenCL(false);
 		int idx_modula = idx % NUMBER_OF_GPU;
 		cuda::setDevice(idx_modula);
 	}
@@ -274,10 +274,10 @@ void stitcher_thread(int idx)
 // prepare video, create threads and queues, put frames to queue and wait output, show it
 int main(int argc, char* argv[])
 {
-	if (try_gpu)
-	{
+	if (use_ocl)
+		ocl::setUseOpenCL(true);
+	else
 		ocl::setUseOpenCL(false);
-	}
 
     // read videos
     DEBUG_PRINT_OUT("start");
