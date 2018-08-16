@@ -7,6 +7,7 @@
 #include <thread>
 #include <iostream>
 #include <atomic>
+#include <mutex>
 #if STITCHER_DEBUG_IMWRTIE == true
 #include <sstream>
 #endif
@@ -24,13 +25,13 @@ using namespace moodycamel;
 #define NUMBER_OF_GPU 4
 #define NUMBER_OF_THREAD (NUMBER_OF_GPU * 1)
 #define QUEUE_SIZE 500
-#define TEST_COUNT (NUMBER_OF_THREAD * 1)
+#define TEST_COUNT (NUMBER_OF_THREAD * 3)
 
 // Option for CUDA implementation
 bool try_gpu = true;
 
 // Option for Optical flow motion compensation
-#define USE_OPT_FLOW false
+#define USE_OPT_FLOW true
 
 // Option for video output
 #define VIDEO_OUT true
@@ -64,6 +65,14 @@ class thread_output
 BlockingReaderWriterQueue<thread_args>      th_arg[NUMBER_OF_THREAD];
 // Stitcher thread's output queue structure queue
 BlockingReaderWriterQueue<thread_output>    th_out[NUMBER_OF_THREAD];
+
+#if USE_OPT_FLOW == true
+mutex first_frames_mutex;
+
+vector<Mat> first_frames;
+vector<detail::MatchesInfo> first_match_infos;
+vector<detail::CameraParams> first_cameras;
+#endif
 
 //OpenCV Mat handle util
 void clear_vector_mat(vector<Mat> &vec_mat)
@@ -128,7 +137,47 @@ Ptr<Stitcher_mod> stitcher_setup()
 }
 
 #if USE_OPT_FLOW == true
+// Stitcher module implementation
+// create stitcher instance, setup, stitch frames
+// also prepare for next optical flow stitching 
+Mat stitching_first_frame(vector<Mat> &first_frames, vector<detail::CameraParams> &first_cameras, vector<detail::MatchesInfo> &first_match_infos)
+{
+    Ptr<Stitcher_mod> stitcher = stitcher_setup();
 
+    START_TIME(Stitch_Time);
+    Mat output;
+    Stitcher_mod::Status status = stitcher->estimateTransform(first_frames);
+
+    first_cameras = stitcher->cameras();
+    first_match_infos = stitcher->matchInfo();
+
+    stitcher->composePanorama(output);
+    STOP_TIME(Stitch_Time);
+
+    return output;
+}
+
+// Stitcher module implementation with Optical flow
+// create stitcher instance, setup, stitch frames
+Mat stitching_optical_flow(vector<Mat> &prev_frames, vector<detail::MatchesInfo> &prev_match_infos, vector<detail::CameraParams> &prev_cameras
+                            , vector<Mat> &current_frames)
+{
+    Ptr<Stitcher_mod> stitcher = stitcher_setup();
+
+    START_TIME(Stitch_Time);
+    Mat output;
+    Stitcher_mod::Status status = stitcher->estimateTransformOpticalFlow(prev_frames, prev_match_infos, prev_cameras
+                                                                        , current_frames, std::vector<std::vector<Rect> >());
+
+    deep_copy_vector_mat(current_frames, prev_frames);
+    prev_cameras = stitcher->cameras();
+    prev_match_infos = stitcher->matchInfo();
+
+    stitcher->composePanorama(output);
+    STOP_TIME(Stitch_Time);
+
+    return output;
+}
 #else
 // Stitcher module implementation
 // create stitcher instance, setup, stitch frames
@@ -176,6 +225,14 @@ void stitcher_thread(int idx)
 		int idx_modula = idx % NUMBER_OF_GPU;
 		cuda::setDevice(idx_modula);
 	}
+
+#if USE_OPT_FLOW == true
+    bool is_first = true;
+    vector<Mat> prev_frames;
+    vector<detail::CameraParams> prev_cameras;
+    vector<detail::MatchesInfo> prev_match_infos;
+#endif
+
     // check quit flag
     while(is_quit[idx].test_and_set())
     {
@@ -186,10 +243,24 @@ void stitcher_thread(int idx)
         {
             DEBUG_PRINT_OUT("Thread number: " << idx << " start stitching");
             thread_output th_out_t;
+#if USE_OPT_FLOW == true
+            if(is_first)
+            {
+                first_frames_mutex.lock();
+                deep_copy_vector_mat(first_frames, prev_frames);
+                prev_cameras = first_cameras;
+                prev_match_infos = first_match_infos;
+                first_frames_mutex.unlock();
+
+                is_first = false;
+            }
+            th_out_t.pano = stitching_optical_flow(prev_frames, prev_match_infos, prev_cameras, th_arg_t.imgs);
+#else
 #if STITCHER_DEBUG_IMWRTIE == true
 			th_out_t.pano = stitching(th_arg_t.imgs, th_out_t.debug_mat);
 #else
 			th_out_t.pano = stitching(th_arg_t.imgs);
+#endif
 #endif
 
             DEBUG_PRINT_OUT("Thread number: " << idx << " push output to queue");
@@ -234,7 +305,14 @@ int main(int argc, char* argv[])
 	START_TIME(Total_Stitch_time);
 
     DEBUG_PRINT_OUT("start stitching first frame");
+#if USE_OPT_FLOW == true
+    first_frames_mutex.lock();
+    deep_copy_vector_mat(vids, first_frames);
+    Mat pano = stitching_first_frame(first_frames, first_cameras, first_match_infos);
+    first_frames_mutex.unlock();
+#else
     Mat pano = stitching(vids);
+#endif
 
     DEBUG_PRINT_OUT("push to output queue");
     output.push_back(pano);

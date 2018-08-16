@@ -241,13 +241,17 @@ Stitcher_mod::Status Stitcher_mod::estimateTransformOpticalFlow(InputArrayOfArra
 
     for(int i = 0; i < imgs_.size(); i++)
     {
+        START_TIME(find_homography_with_optical_flow);
         std::vector<Mat> images;
         images.push_back(imgs_[i].getMat(ACCESS_READ));
         images.push_back(pre_imgs_[i].getMat(ACCESS_READ));
 
         Mat H = optical_flow_homography_find(images);
+        STOP_TIME(find_homography_with_optical_flow);
 
+        START_TIME(warp_with_optical_flow_homography);
         warpPerspective(imgs_[i], imgs_[i], H, pre_imgs_[i].size());
+        STOP_TIME(warp_with_optical_flow_homography);
     }
 
     cameras_ = pre_cameras_;
