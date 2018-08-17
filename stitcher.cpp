@@ -141,7 +141,7 @@ cv::Mat optical_flow_homography_find(std::vector<cv::Mat> &images)
     Mat homogrpy = findHomography(good_track_point[0], good_track_point[1], RANSAC);
     return homogrpy;
 }
-
+#if defined(HAVE_OPENCV_CUDAIMGPROC) && defined(HAVE_OPENCV_CUDAOPTFLOW)
 static void download(const cuda::GpuMat& d_mat, std::vector<Point2f>& vec)
 {
 	vec.resize(d_mat.cols);
@@ -200,6 +200,7 @@ cv::Mat optical_flow_homography_find_gpu(std::vector<cv::Mat> &images)
 	Mat homogrpy = findHomography(good_track_point[0], good_track_point[1], RANSAC);
 	return homogrpy;
 }
+#endif
 
 Stitcher_mod Stitcher_mod::createDefault(bool try_use_gpu)
 {
@@ -329,8 +330,11 @@ Stitcher_mod::Status Stitcher_mod::estimateTransformOpticalFlow(InputArrayOfArra
 			std::vector<Mat> images;
 			images.push_back(imgs_tmp[i].getMat(ACCESS_READ));
 			images.push_back(pre_imgs_[i].getMat(ACCESS_READ));
-
+#if defined(HAVE_OPENCV_CUDAIMGPROC) && defined(HAVE_OPENCV_CUDAOPTFLOW)
 			H = optical_flow_homography_find_gpu(images);
+#else
+            H = optical_flow_homography_find(images);
+#endif
 		}
 		else
 		{
@@ -345,6 +349,7 @@ Stitcher_mod::Status Stitcher_mod::estimateTransformOpticalFlow(InputArrayOfArra
 		START_TIME(warp_with_optical_flow_homography);
 		if (cuda_optical_flow)
 		{
+#ifdef HAVE_OPENCV_CUDAWARPING
 			cv::cuda::GpuMat opt_flow_warped;
 			cv::cuda::GpuMat input;
 			UMat output;
@@ -352,6 +357,11 @@ Stitcher_mod::Status Stitcher_mod::estimateTransformOpticalFlow(InputArrayOfArra
 			cv::cuda::warpPerspective(input, opt_flow_warped, H, pre_imgs_[i].size());
 			opt_flow_warped.download(output);
 			imgs_.push_back(output.clone());
+#else
+            Mat opt_flow_warped;
+			cv::warpPerspective(imgs_tmp[i], opt_flow_warped, H, pre_imgs_[i].size());
+			imgs_.push_back(opt_flow_warped.getUMat(ACCESS_RW).clone());
+#endif
 		}
 		else
 		{
