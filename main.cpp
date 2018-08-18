@@ -32,7 +32,7 @@ bool try_gpu = true;
 bool use_ocl = true;
 
 // USE stitcher's default setting
-bool stitcher_default = true;
+bool stitcher_default = false;
 
 // Option for Optical flow motion compensation
 #define USE_OPT_FLOW true
@@ -300,7 +300,7 @@ int main(int argc, char* argv[])
 		ocl::setUseOpenCL(false);
 
     // read videos
-    DEBUG_PRINT_OUT("start");
+    APP_PRINT_OUT("start");
     VideoCapture vid0("videofile0.avi");
     VideoCapture vid1("videofile1.avi");
     VideoCapture vid2("videofile2.avi");
@@ -322,7 +322,7 @@ int main(int argc, char* argv[])
     vid1 >> vids[1];
     vid2 >> vids[2];
 
-	START_TIME(Total_Stitch_time);
+	START_APP_TIME(Total_Stitch_time);
 
     DEBUG_PRINT_OUT("start stitching first frame");
 #if USE_OPT_FLOW == true
@@ -392,10 +392,10 @@ int main(int argc, char* argv[])
     }
     DEBUG_PRINT_OUT("All stitch threads join\n");
 
-	DEBUG_PRINT_OUT("stitching completed successfully\n");
-	STOP_TIME(Total_Stitch_time);
-	DEBUG_PRINT_OUT("Stitched frames : " << output.size());
-	DEBUG_PRINT_OUT("Stitched Frames per sec : " << (output.size()*1.0f) / (Total_Stitch_time / getTickFrequency()*1.0f));
+	APP_PRINT_OUT("stitching completed successfully\n");
+	STOP_APP_TIME(Total_Stitch_time);
+	APP_PRINT_OUT("Stitched frames : " << output.size());
+	APP_PRINT_OUT("Stitched Frames per sec : " << (output.size()*1.0f) / (Total_Stitch_time / getTickFrequency()*1.0f));
 
 #if VIDEO_OUT == true
 	//prepare output video
