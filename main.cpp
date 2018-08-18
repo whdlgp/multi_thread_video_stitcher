@@ -31,6 +31,9 @@ using namespace moodycamel;
 bool try_gpu = true;
 bool use_ocl = true;
 
+// USE stitcher's default setting
+bool stitcher_default = true;
+
 // Option for Optical flow motion compensation
 #define USE_OPT_FLOW true
 
@@ -106,32 +109,45 @@ Ptr<Stitcher_mod> stitcher_setup()
     STOP_TIME(Setup_stitcher_params);
 
     START_TIME(Setup_stitcher_modules);
-    if(try_gpu)
-    {
-		#if defined(HAVE_OPENCV_XFEATURES2D) && defined(HAVE_OPENCV_CUDALEGACY)
-		stitcher->setFeaturesFinder(makePtr<detail::SurfFeaturesFinderGpu>());		//GPU
-		#endif
-		stitcher->setFeaturesMatcher(makePtr<detail::BestOf2NearestMatcher>(true));
-		stitcher->setBundleAdjuster(makePtr<detail::BundleAdjusterRay>());
-		#ifdef HAVE_OPENCV_CUDAWARPING
-		stitcher->setWarper(makePtr<SphericalWarperGpu>());							//GPU
-		#endif	
+	if (stitcher_default)
+	{
+		stitcher->setFeaturesFinder(makePtr<detail::OrbFeaturesFinder>());
+		stitcher->setWarper(makePtr<SphericalWarper>());
+		stitcher->setSeamFinder(makePtr<detail::GraphCutSeamFinder>(detail::GraphCutSeamFinderBase::COST_COLOR));
 		stitcher->setExposureCompensator(makePtr<detail::BlocksGainCompensator>());
-		stitcher->setSeamFinder(makePtr<detail::VoronoiSeamFinder>());
-		#if defined(HAVE_OPENCV_CUDAARITHM) && defined(HAVE_OPENCV_CUDAWARPING)
-		stitcher->setBlender(makePtr<detail::MultiBandBlender>(true));				//GPU
-		#endif	
-    }
-    else
-    {
-        stitcher->setFeaturesFinder(makePtr<detail::OrbFeaturesFinder>());
-        stitcher->setFeaturesMatcher(makePtr<detail::BestOf2NearestMatcher>(false));
-        stitcher->setBundleAdjuster(makePtr<detail::BundleAdjusterRay>());
-        stitcher->setWarper(makePtr<SphericalWarper>());
-        stitcher->setExposureCompensator(makePtr<detail::BlocksGainCompensator>());
-        stitcher->setSeamFinder(makePtr<detail::VoronoiSeamFinder>());
 		stitcher->setBlender(makePtr<detail::MultiBandBlender>(false));
-    }
+		stitcher->setFeaturesMatcher(makePtr<detail::BestOf2NearestMatcher>(false));
+		stitcher->setBundleAdjuster(makePtr<detail::BundleAdjusterRay>());
+	}
+	else
+	{
+		if (try_gpu)
+		{
+#if defined(HAVE_OPENCV_XFEATURES2D) && defined(HAVE_OPENCV_CUDALEGACY)
+			stitcher->setFeaturesFinder(makePtr<detail::SurfFeaturesFinderGpu>());		//GPU
+#endif
+			stitcher->setFeaturesMatcher(makePtr<detail::BestOf2NearestMatcher>(true));
+			stitcher->setBundleAdjuster(makePtr<detail::BundleAdjusterRay>());
+#ifdef HAVE_OPENCV_CUDAWARPING
+			stitcher->setWarper(makePtr<SphericalWarperGpu>());							//GPU
+#endif	
+			stitcher->setExposureCompensator(makePtr<detail::BlocksGainCompensator>());
+			stitcher->setSeamFinder(makePtr<detail::VoronoiSeamFinder>());
+#if defined(HAVE_OPENCV_CUDAARITHM) && defined(HAVE_OPENCV_CUDAWARPING)
+			stitcher->setBlender(makePtr<detail::MultiBandBlender>(true));				//GPU
+#endif	
+		}
+		else
+		{
+			stitcher->setFeaturesFinder(makePtr<detail::OrbFeaturesFinder>());
+			stitcher->setFeaturesMatcher(makePtr<detail::BestOf2NearestMatcher>(false));
+			stitcher->setBundleAdjuster(makePtr<detail::BundleAdjusterRay>());
+			stitcher->setWarper(makePtr<SphericalWarper>());
+			stitcher->setExposureCompensator(makePtr<detail::BlocksGainCompensator>());
+			stitcher->setSeamFinder(makePtr<detail::VoronoiSeamFinder>());
+			stitcher->setBlender(makePtr<detail::MultiBandBlender>(false));
+		}
+	}
     STOP_TIME(Setup_stitcher_modules);
 
     return stitcher;
